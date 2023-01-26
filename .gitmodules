@@ -1,0 +1,3 @@
+[submodule "upstream/bn"]
+	path = upstream/bn
+	url = https://github.com/tj-actions/branch-names.git
