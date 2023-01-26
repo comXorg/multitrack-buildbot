@@ -52,22 +52,6 @@ outputs:
     value: ${{ steps.docker-push.outputs.url }}
     description: 'The full resource path to the container'
 
-env:
-  COMX_PROJECTNAME: ${{ inputs.projectname }}
-  GCP_PROJECTID: ${{ secrets.GCP_PROJECTID }}
-  GCP_CLUSTER_ID: ${{ secrets.GCP_CLUSTERID }}
-  GCP_CLUSTER_REGION: ${{ secrets.GCP_CLUSTERREGION }}
-  GAR_LOCATION: ${{ secrets.GCP_CLUSTERREGION }}
-  GCP_REPOSITORY:  ${{ inputs.artifact_repo }}
-  GCP_ARTIFACT_REGISTRY_HOST: ${{ inputs.artifact_registry_host }}
-  GCP_ARTIFACT_REGISTRY_PATH: $PROJECT_ID/${{ inputs.artifact_repo }}/${{ env.IMAGEBASE }}-${{ env.DEPLOYMENT_NAME }}"
-  GKE_ZONE: ( a c )
-  DEPLOYMENT_NAME: ${{ github.repository.name }} 
-  DEPLOYMENT_SIZE: 3
-  TAG: $GITHUB_SHA
-  IMAGE: ${{ github.org.login }}/${{ env.COMX_PROJECTNAME }}
-  IMAGEBASE: ${{ env.COMX_PROJECTNAME }}
-  IMAGEURL: "${{ inputs.artifact_registry_host }}/{{ env.GCP_ARTIFACT_REGISTRY_PATH }}"
 
 runs:
   using: "composite"
@@ -90,7 +74,7 @@ runs:
         shell: bash
           
       - name: Set the repo tags
-      - id: buildtags
+        id: buildtags
         run: |
           # "Make image path."
           if [[ "${{ github.ref }}" != "refs/tags/"* ]]; then
@@ -140,6 +124,7 @@ runs:
         run: |
           echo ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }} > ~/.sa_deployer_key.json
           gcloud auth configure-docker "$GCP_ARTIFACT_REGISTRY_HOST"
+        shell: bash
       
       
       - name: Build Base Image - Docker
@@ -154,13 +139,14 @@ runs:
               --build-arg GITHUB_SHA="$GITHUB_SHA" \
               --build-arg GITHUB_REF="$GITHUB_REF" \
               .
+        shell: bash
 
         
       - name: Push Base Image - Docker
         id: docker-push
         run: |
           docker push $IMAGEURL:{{ steps.buildtags.outputs.tagfull }} || echo "::error:: docker push failure. Check the logs" 
-          
+        shell: bash
           
       - name: Logging stop
         run: |
