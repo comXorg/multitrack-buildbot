@@ -24,11 +24,11 @@ inputs:
     required: true
   artifact_registry_path:
     description: 'myorganisation/myprojectnickname'
-    default: "{{ secret.$GCP_PROJECTID }}/{{ inputs.projectname }}"
+    default: "${{ secret.$GCP_PROJECTID }}/${{ inputs.projectname }}"
     required: true
   artifact_repo:
     description: 'myorganisationid'
-    default: "{{ secret.$GCP_REPO }}"
+    default: "${{ secret.$GCP_REPO }}"
     required: true
   enviroment:
     description: 'The github action enviroment to override'
@@ -130,6 +130,7 @@ runs:
           echo "::setmask::{workload_identity_provider}"
           echo "::setmask::{service_account}"
           echo "::setmask::{audience}"
+        shell: bash
           
       - name: Google Cloud SDK Installation
         id: gcloud
@@ -153,7 +154,7 @@ runs:
               --build-arg GITHUB_SHA="$GITHUB_SHA" \
               --build-arg GITHUB_REF="$GITHUB_REF" \
               .
-          echo "::endgroup::"
+
         
       - name: Push Base Image - Docker
         id: docker-push
