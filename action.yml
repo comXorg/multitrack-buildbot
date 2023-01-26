@@ -1,0 +1,167 @@
+name: Multitrack Builder
+description: Build and push dockers dynamically based on the branch
+author: comxprojects
+inputs:
+  strip_tag_prefix:
+    description: 'The prefix that should be stripped from the tag e.g `v0.0.1` -> `(strip v)` -> `0.0.1`'
+    default: ''
+    required: false
+  projectname:
+    description: 'The name of your project e.g `happy-mountain` -> `hyperloop` -> `fishtank-controller`'
+    default: ''
+    required: true
+  gcp_location:
+    description: ''
+    default: ${{ secrets.GCP_CLUSTERREGION }}
+    required: true
+  gcp_clusterid:
+    description: ''
+    default: ${{ secrets.GCP_CLUSTERID }}
+    required: true
+  artifact_registry_host:
+    description: 'eg ```$GAR_LOCATION-docker.pkg.dev```'
+    default: $GCP_CLUSTERREGION-docker.pkg.dev
+    required: true
+  artifact_registry_path:
+    description: 'myorganisation/myprojectnickname'
+    default: "{{ secret.$GCP_PROJECTID }}/{{ inputs.projectname }}"
+    required: true
+  artifact_repo:
+    description: 'myorganisationid'
+    default: "{{ secret.$GCP_REPO }}"
+    required: true
+  enviroment:
+    description: 'The github action enviroment to override'
+    default: "uat"
+    required: true
+
+outputs:
+  is_tag:
+    value: ${{ steps.tag.outputs.is_tag }}
+    description: 'Returns `"true"` if the current branch is a tag else `"false"`.'
+  default_branch:
+    value: ${{ steps.default.outputs.default_branch }}
+    description: 'The default branch name e.g `main` OR `master`'
+  current_branch:
+    value: ${{ steps.current_branch.outputs.current_branch }}
+    description: 'The current branch name regardless of event_type e.g `main`, `feature/test`'
+  tag:
+    value: ${{ steps.tag.outputs.tag }}
+    description: 'The tag that triggered the workflow run. e.g `v0.0.1`, `0.0.1`'
+  container_path:
+    value: ${{ steps.docker-push.outputs.url }}
+    description: 'The full resource path to the container'
+
+env:
+  COMX_PROJECTNAME: ${{ inputs.projectname }}
+  GCP_PROJECTID: ${{ secrets.GCP_PROJECTID }}
+  GCP_CLUSTER_ID: ${{ secrets.GCP_CLUSTERID }}
+  GCP_CLUSTER_REGION: ${{ secrets.GCP_CLUSTERREGION }}
+  GAR_LOCATION: ${{ secrets.GCP_CLUSTERREGION }}
+  GCP_REPOSITORY:  ${{ inputs.artifact_repo }}
+  GCP_ARTIFACT_REGISTRY_HOST: ${{ inputs.artifact_registry_host }}
+  GCP_ARTIFACT_REGISTRY_PATH: $PROJECT_ID/${{ inputs.artifact_repo }}/${{ env.IMAGEBASE }}-${{ env.DEPLOYMENT_NAME }}"
+  GKE_ZONE: ( a c )
+  DEPLOYMENT_NAME: ${{ github.repository.name }} 
+  DEPLOYMENT_SIZE: 3
+  TAG: $GITHUB_SHA
+  IMAGE: ${{ github.org.login }}/${{ env.COMX_PROJECTNAME }}
+  IMAGEBASE: ${{ env.COMX_PROJECTNAME }}
+  IMAGEURL: "${{ inputs.artifact_registry_host }}/{{ env.GCP_ARTIFACT_REGISTRY_PATH }}"
+
+runs:
+  using: "composite"
+  steps: 
+      - name: Checkout Source
+        uses: actions/checkout@v3
+        
+      - name: Logging start
+        run: |
+          echo "::group::Dynamic builder"
+        shell: bash
+        
+      - name: Get branch name
+        id: branch-name
+        uses: tj-actions/branch-names@v6
+        
+      - name: Logging start
+        run: |
+          echo "::notice:: Found branch to ${{ steps.branch-name.outputs.current_branch }}"
+        shell: bash
+          
+      - name: Set the repo tags
+      - id: buildtags
+        run: |
+          # "Make image path."
+          if [[ "${{ github.ref }}" != "refs/tags/"* ]]; then
+              if [[ "${{ steps.current_branch.outputs.current_branch }}" == "release" ]] 
+              || [[ "${{ steps.current_branch.outputs.current_branch }}" == "main" ]] ;
+              then 
+                echo "::debug Setting docker tag up"
+                REF=$(printf "%q" "${{ github.ref }}
+                TAG=${REF/refs\/tags\/v/}
+                echo "::set-output name=tag::$(eval printf "%s" "$TAG")"     >> "$GITHUB_OUTPUT"
+                echo "::set-output name=tagfull::$(eval printf "%s" "$TAG")" >> "$GITHUB_OUTPUT"
+                echo "{TAG}={$(eval printf "%s" "$TAG")}"                >> $GITHUB_ENV
+                echo "{TAGOUT}={$(eval printf "%s" "$TAG")-$GITHUB_REF}" >> $GITHUB_ENV
+                echo "tag=$(eval printf "%s" "$TAG")"                    >> "$GITHUB_OUTPUT"
+                if [[ -z "$GITHUB_OUTPUT" ]]; then
+                    echo "{DEPLOYMENT_NAME}={${{ steps.current_branch.outputs.current_branch }}}"  >> $GITHUB_ENV
+                    echo "{IMAGE}={$IMAGEBASE-${{ steps.current_branch.outputs.current_branch }}}" >> $GITHUB_ENV
+                else
+                    echo "::notice::No GITHUB global vars present"
+                    echo "::set-output name=image_name::$IMAGEBASE-${{ steps.current_branch.outputs.current_branch }}"
+                    echo "::set-output name=image_tag::$IMAGEBASE-${{ steps.current_branch.outputs.current_branch }}"
+                fi
+              fi
+          fi
+        shell: bash
+      
+      - name: Authentication - Google Cloud
+        id: auth
+        uses: google-github-actions/auth@v1
+        with:
+          workload_identity_provider: projects/707216733318/locations/global/workloadIdentityPools/cicd-identity-pool/providers/github
+          service_account: github-deployer-service-accoun@clustering-app-367913.iam.gserviceaccount.com
+          audience: https://iam.googleapis.com/projects/707216733318/locations/global/workloadIdentityPools/cicd-identity-pool/providers/github
+
+      - name: Redact
+        run: |
+          echo "::setmask::{workload_identity_provider}"
+          echo "::setmask::{service_account}"
+          echo "::setmask::{audience}"
+          
+      - name: Google Cloud SDK Installation
+        id: gcloud
+        uses: google-github-actions/setup-gcloud@v0
+      
+      - name: Authentication - Google Artifact Registry
+        run: |
+          echo ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }} > ~/.sa_deployer_key.json
+          gcloud auth configure-docker "$GCP_ARTIFACT_REGISTRY_HOST"
+      
+      
+      - name: Build Base Image - Docker
+        id: build-o-box
+        run: |
+          echo "::notice Building Artifact:$GCP_ARTIFACT_REGISTRY_HOST/$GCP_ARTIFACT_REGISTRY_PATH/${{ env.IMAGEBASE }}:{{ steps.buildtags.outputs.tagfull }}"
+          [[ -f "./build/Dockerfile.${{ steps.branch-name.outputs.current_branch }}" ]] \
+          || echo "::error Dockerfile ./build/Dockerfile.${{ steps.branch-name.outputs.current_branch }} not found"
+          docker build \
+              -t "$GCP_ARTIFACT_REGISTRY_HOST/$GCP_ARTIFACT_REGISTRY_PATH/${{ env.IMAGEBASE }}:{{ steps.buildtags.outputs.tagfull }}" \
+              -f "./build/Dockerfile.${{ steps.branch-name.outputs.current_branch }}" \
+              --build-arg GITHUB_SHA="$GITHUB_SHA" \
+              --build-arg GITHUB_REF="$GITHUB_REF" \
+              .
+          echo "::endgroup::"
+        
+      - name: Push Base Image - Docker
+        id: docker-push
+        run: |
+          docker push $IMAGEURL:{{ steps.buildtags.outputs.tagfull }} || echo "::error:: docker push failure. Check the logs" 
+          
+          
+      - name: Logging stop
+        run: |
+          echo "::groupend::"
+        shell: bash
