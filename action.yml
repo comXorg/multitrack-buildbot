@@ -4,23 +4,35 @@ author: comxprojects
 inputs:
   strip_tag_prefix:
     description: 'The prefix that should be stripped from the tag e.g `v0.0.1` -> `(strip v)` -> `0.0.1`'
-    default: ''
+    default: 'v'
     required: false
   projectname:
     description: 'The name of your project e.g `happy-mountain` -> `hyperloop` -> `fishtank-controller`'
     default: ''
     required: true
-  gcp_location:
-    description: ''
-    default: ${{ secrets.GCP_CLUSTERREGION }}
+  gcp_cluster_location:
+    description: 'the region + the zone = the location: *Forexample* europe-west-3'
+    default: ${{ secrets.gcp_cluster_location }}
     required: true
   gcp_clusterid:
-    description: ''
+    description: 'This the human readable name of your kube cluster'
+    default: ${{ secrets.GCP_CLUSTERID }}
+    required: true
+  gcp_sagent:
+    description: 'Security agent for GCP'
+    default: ${{ secrets.GCP_WORKLOAD_SA }}
+    required: true
+  gcp_workload_id_provider:
+    description: 'This is the name of your broker layer it needs to be created on GCP. See docs'
+    default: ${{ secrets.GCP_WORKLOAD_IDS }}
+    required: true
+  gcp_workload_sa:
+    description: 'The is human readable name of your service worker, its in email format'
     default: ${{ secrets.GCP_CLUSTERID }}
     required: true
   artifact_registry_host:
-    description: 'eg ```$GAR_LOCATION-docker.pkg.dev```'
-    default: $GCP_CLUSTERREGION-docker.pkg.dev
+    description: 'eg ```${{  inputs.gcp_cluster_location }}-docker.pkg.dev```'
+    default: ${{  inputs.gcp_cluster_location }}-docker.pkg.dev
     required: true
   artifact_registry_path:
     description: 'myorganisation/myprojectnickname'
@@ -86,9 +98,9 @@ runs:
                 TAG=${REF/refs\/tags\/v/}
                 echo "::set-output name=tag::$(eval printf "%s" "$TAG")"     >> "$GITHUB_OUTPUT"
                 echo "::set-output name=tagfull::$(eval printf "%s" "$TAG")" >> "$GITHUB_OUTPUT"
-                echo "{TAG}={$(eval printf "%s" "$TAG")}"                >> $GITHUB_ENV
-                echo "{TAGOUT}={$(eval printf "%s" "$TAG")-$GITHUB_REF}" >> $GITHUB_ENV
-                echo "tag=$(eval printf "%s" "$TAG")"                    >> "$GITHUB_OUTPUT"
+                echo "{TAG}={$(eval printf "%s" "$TAG")}"                    >> "$GITHUB_ENV"
+                echo "{TAGOUT}={$(eval printf "%s" "$TAG")-$GITHUB_REF}"     >> "$GITHUB_ENV"
+                echo "tag=$(eval printf "%s" "$TAG")"                        >> "$GITHUB_OUTPUT"
                 if [[ -z "$GITHUB_OUTPUT" ]]; then
                     echo "{DEPLOYMENT_NAME}={${{ steps.current_branch.outputs.current_branch }}}"  >> $GITHUB_ENV
                     echo "{IMAGE}={$IMAGEBASE-${{ steps.current_branch.outputs.current_branch }}}" >> $GITHUB_ENV
@@ -101,20 +113,22 @@ runs:
           fi
         shell: bash
       
+      - name: Redact
+        run: |
+          echo "::setmask::{${{ inputs.gcp_sagent }}}"
+          echo "::setmask::{${{ inputs.gcp_workload_id_provider }}}"
+        shell: bash
+
+
       - name: Authentication - Google Cloud
         id: auth
         uses: google-github-actions/auth@v1
         with:
-          workload_identity_provider: projects/707216733318/locations/global/workloadIdentityPools/cicd-identity-pool/providers/github
-          service_account: github-deployer-service-accoun@clustering-app-367913.iam.gserviceaccount.com
-          audience: https://iam.googleapis.com/projects/707216733318/locations/global/workloadIdentityPools/cicd-identity-pool/providers/github
+          workload_identity_provider: ${{ inputs.gcp_sagent }}$GCP_WORKLOAD_IDS
+          service_account: ${{ inputs.gcp_sagent }}
+          audience: https://iam.googleapis.com/${{ inputs.gcp_workload_id_provider }}
 
-      - name: Redact
-        run: |
-          echo "::setmask::{workload_identity_provider}"
-          echo "::setmask::{service_account}"
-          echo "::setmask::{audience}"
-        shell: bash
+
           
       - name: Google Cloud SDK Installation
         id: gcloud
@@ -145,7 +159,8 @@ runs:
       - name: Push Base Image - Docker
         id: docker-push
         run: |
-          docker push $IMAGEURL:{{ steps.buildtags.outputs.tagfull }} || echo "::error:: docker push failure. Check the logs" 
+          docker push $IMAGEURL:{{ steps.buildtags.outputs.tagfull }} \
+          || echo "::error:: docker push failure. Check the logs" 
         shell: bash
           
       - name: Logging stop
